@@ -1,0 +1,12 @@
+---
+- name: Test luks_passphrase_rotation role
+  hosts: luks_hosts
+  become: true
+  vars:
+    luks_rotation_current_passphrases:
+      - "test-current-passphrase"
+    luks_rotation_vault_integration: "none"
+    luks_rotation_local_backup_enabled: false
+    luks_rotation_no_log: false
+  roles:
+    - role: "{{ playbook_dir }}/.."

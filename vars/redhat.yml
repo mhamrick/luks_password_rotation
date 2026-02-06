@@ -1,0 +1,9 @@
+---
+cryptsetup_package_names:
+  - "cryptsetup"
+
+tpm2_package_names:
+  - "tpm2-tools"
+  - "tpm2-tss"
+
+tpm2_initramfs_command: "dracut --regenerate-all --force"

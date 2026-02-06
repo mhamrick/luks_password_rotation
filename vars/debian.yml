@@ -1,0 +1,8 @@
+---
+cryptsetup_package_names:
+  - "cryptsetup-bin"
+
+tpm2_package_names:
+  - "tpm2-tools"
+
+tpm2_initramfs_command: "update-initramfs -u -k all"

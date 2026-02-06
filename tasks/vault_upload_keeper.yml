@@ -1,0 +1,85 @@
+---
+# tasks/vault_upload_keeper.yml — Store passphrase in Keeper Vault
+# Requires: keeper CLI installed, config file at keeper_config_path
+
+- name: Verify Keeper CLI is installed
+  ansible.builtin.command:
+    cmd: keeper version
+  delegate_to: localhost
+  become: false
+  register: _keeper_version
+  changed_when: false
+  failed_when: _keeper_version.rc != 0
+
+- name: Set item title for Keeper
+  ansible.builtin.set_fact:
+    _keeper_item_title: "{{ luks_rotation_vault_title_template }}"
+
+- name: Expand Keeper config path
+  ansible.builtin.set_fact:
+    _keeper_config_expanded: "{{ luks_rotation_keeper_config_path | expanduser }}"
+
+- name: Override Keeper config path from environment if set
+  ansible.builtin.set_fact:
+    _keeper_config_expanded: "{{ lookup('env', 'KEEPER_CONFIG_PATH') }}"
+  when: lookup('env', 'KEEPER_CONFIG_PATH') != ""
+
+- name: Check if record already exists in Keeper
+  ansible.builtin.shell:
+    cmd: >
+      keeper search --config "{{ _keeper_config_expanded }}"
+      "{{ _keeper_item_title }}" --format json 2>/dev/null |
+      jq -r '.[] | select(.title == "{{ _keeper_item_title }}") | .uid' | head -1
+  delegate_to: localhost
+  become: false
+  register: _keeper_existing_record
+  changed_when: false
+  failed_when: false
+
+- name: Create new password record in Keeper
+  ansible.builtin.command:
+    cmd: >
+      keeper record-add
+      --config "{{ _keeper_config_expanded }}"
+      --folder "{{ luks_rotation_keeper_folder_path }}"
+      --record-type password
+      --title "{{ _keeper_item_title }}"
+      --password "{{ _luks_rotation_new_passphrase }}"
+  delegate_to: localhost
+  become: false
+  register: _keeper_create_result
+  when: _keeper_existing_record.stdout == ""
+  failed_when: luks_rotation_vault_fail_on_upload_error and _keeper_create_result.rc != 0
+
+- name: Update existing password record in Keeper
+  ansible.builtin.command:
+    cmd: >
+      keeper edit
+      --config "{{ _keeper_config_expanded }}"
+      "{{ _keeper_existing_record.stdout }}"
+      --password "{{ _luks_rotation_new_passphrase }}"
+  delegate_to: localhost
+  become: false
+  register: _keeper_update_result
+  when: _keeper_existing_record.stdout != ""
+  failed_when: luks_rotation_vault_fail_on_upload_error and _keeper_update_result.rc != 0
+
+- name: Add custom fields to Keeper record
+  ansible.builtin.command:
+    cmd: >
+      keeper edit
+      --config "{{ _keeper_config_expanded }}"
+      "{{ _keeper_existing_record.stdout | default(_keeper_create_result.stdout) }}"
+      --custom-field "hostname={{ inventory_hostname }}"
+      --custom-field "luks_devices={{ _luks_rotation_device_list | join(',') }}"
+      --custom-field "rotated_date={{ ansible_date_time.iso8601 }}"
+  delegate_to: localhost
+  become: false
+  when: (_keeper_create_result is changed) or (_keeper_update_result is changed)
+  failed_when: false
+
+- name: Report Keeper upload status
+  ansible.builtin.debug:
+    msg: >
+      Keeper upload {{ 'successful' if (_keeper_create_result is changed or _keeper_update_result is changed)
+      else 'skipped (no changes)' }} for {{ inventory_hostname }}

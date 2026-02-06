@@ -1,0 +1,24 @@
+---
+# tasks/generate_passphrase.yml — Generate a random passphrase
+
+- name: Map charset name to password lookup characters
+  ansible.builtin.set_fact:
+    _luks_rotation_chars: >-
+      {%- if luks_rotation_passphrase_charset == "hex" -%}
+        hexdigits
+      {%- elif luks_rotation_passphrase_charset == "ascii_printable" -%}
+        ascii_letters,digits,punctuation
+      {%- else -%}
+        ascii_letters,digits
+      {%- endif -%}
+
+- name: Generate random passphrase
+  ansible.builtin.set_fact:
+    _luks_rotation_new_passphrase: "{{ lookup('ansible.builtin.password', '/dev/null chars=' + _luks_rotation_chars + ' length=' + luks_rotation_passphrase_length | string) }}"
+
+- name: Confirm passphrase was generated
+  ansible.builtin.assert:
+    that:
+      - _luks_rotation_new_passphrase is defined
+      - _luks_rotation_new_passphrase | length > 0
+    fail_msg: "Failed to generate a new passphrase"

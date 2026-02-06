@@ -1,0 +1,61 @@
+---
+# tasks/rotate_passphrase.yml — Add new passphrase, remove old passphrases
+
+- name: Rotate LUKS passphrases
+  block:
+    - name: Add new passphrase to each LUKS device
+      community.crypto.luks_device:
+        device: "{{ item }}"
+        state: "present"
+        passphrase: "{{ luks_rotation_current_passphrases[0] }}"
+        new_passphrase: "{{ _luks_rotation_new_passphrase }}"
+      become: true
+      loop: "{{ _luks_rotation_device_list }}"
+      loop_control:
+        label: "{{ item }} - REDACTED"
+
+    - name: Remove old passphrases from each LUKS device
+      community.crypto.luks_device:
+        device: "{{ item.0 }}"
+        state: "present"
+        passphrase: "{{ _luks_rotation_new_passphrase }}"
+        remove_passphrase: "{{ item.1 }}"
+      become: true
+      loop: "{{ _luks_rotation_device_list | product(luks_rotation_current_passphrases) | list }}"
+      loop_control:
+        label: "{{ item.0 }} - REDACTED"
+
+  rescue:
+    - name: "Rescue: Try every current passphrase to add the new one"
+      community.crypto.luks_device:
+        device: "{{ item.0 }}"
+        state: "present"
+        passphrase: "{{ item.1 }}"
+        new_passphrase: "{{ _luks_rotation_new_passphrase }}"
+      ignore_errors: true
+      become: true
+      loop: "{{ _luks_rotation_device_list | product(luks_rotation_current_passphrases) | list }}"
+      loop_control:
+        label: "{{ item.0 }} - REDACTED"
+
+    - name: "Rescue: Remove old passphrases using new passphrase"
+      community.crypto.luks_device:
+        device: "{{ item.0 }}"
+        state: "present"
+        passphrase: "{{ _luks_rotation_new_passphrase }}"
+        remove_passphrase: "{{ item.1 }}"
+      ignore_errors: true
+      become: true
+      loop: "{{ _luks_rotation_device_list | product(luks_rotation_current_passphrases) | list }}"
+      loop_control:
+        label: "{{ item.0 }} - REDACTED"
+
+    - name: "Rescue: Verify new passphrase works on all devices"
+      community.crypto.luks_device:
+        device: "{{ item }}"
+        state: "present"
+        passphrase: "{{ _luks_rotation_new_passphrase }}"
+      become: true
+      loop: "{{ _luks_rotation_device_list }}"
+      loop_control:
+        label: "{{ item }} - REDACTED"

@@ -1,0 +1,81 @@
+---
+# tasks/main.yml — Orchestrator for luks_passphrase_rotation
+
+- name: Gather vars for each distro
+  ansible.builtin.include_vars: "{{ included_var_file }}"
+  vars:
+    params:
+      files:
+        - "{{ ansible_os_family | lower }}-{{ ansible_distribution_major_version | lower }}.yml"
+        - "{{ ansible_os_family | lower }}.yml"
+      paths:
+        - ../vars
+    included_var_file: "{{ lookup('first_found', params) }}"
+  tags:
+    - always
+
+- name: Install cryptsetup packages
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  become: true
+  loop: "{{ cryptsetup_package_names }}"
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - luks_rotation_current_passphrases is defined
+      - luks_rotation_current_passphrases | length > 0
+    fail_msg: "luks_rotation_current_passphrases must be defined and non-empty"
+
+- name: Validate vault password file when local backup is enabled
+  ansible.builtin.assert:
+    that:
+      - luks_rotation_vault_password_file is defined
+      - luks_rotation_vault_password_file | length > 0
+    fail_msg: "luks_rotation_vault_password_file must be set when luks_rotation_local_backup_enabled is true"
+  when: luks_rotation_local_backup_enabled | bool
+
+- name: Generate new passphrase
+  ansible.builtin.include_tasks:
+    file: generate_passphrase.yml
+    apply:
+      no_log: "{{ luks_rotation_no_log | bool }}"
+
+- name: Discover LUKS devices
+  ansible.builtin.include_tasks:
+    file: discover_devices.yml
+
+- name: Rotate passphrases on LUKS devices
+  ansible.builtin.include_tasks:
+    file: rotate_passphrase.yml
+    apply:
+      no_log: "{{ luks_rotation_no_log | bool }}"
+
+- name: Enroll TPM2 auto-unlock on LUKS devices
+  ansible.builtin.include_tasks:
+    file: enroll_tpm2.yml
+    apply:
+      no_log: "{{ luks_rotation_no_log | bool }}"
+  when: luks_rotation_tpm2_enabled | bool
+
+- name: Upload passphrase to 1Password
+  ansible.builtin.include_tasks:
+    file: vault_upload_1password.yml
+    apply:
+      no_log: "{{ luks_rotation_no_log | bool }}"
+  when: luks_rotation_vault_integration in ["1password", "both"]
+
+- name: Upload passphrase to Keeper
+  ansible.builtin.include_tasks:
+    file: vault_upload_keeper.yml
+    apply:
+      no_log: "{{ luks_rotation_no_log | bool }}"
+  when: luks_rotation_vault_integration in ["keeper", "both"]
+
+- name: Save encrypted local backup
+  ansible.builtin.include_tasks:
+    file: local_backup.yml
+    apply:
+      no_log: "{{ luks_rotation_no_log | bool }}"
+  when: luks_rotation_local_backup_enabled | bool

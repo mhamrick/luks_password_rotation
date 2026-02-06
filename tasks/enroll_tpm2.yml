@@ -1,0 +1,126 @@
+---
+# tasks/enroll_tpm2.yml — Enroll TPM2 auto-unlock on LUKS devices
+
+- name: Install TPM2 packages
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  become: true
+  loop: "{{ tpm2_package_names }}"
+
+- name: Check systemd-cryptenroll is available
+  ansible.builtin.command: systemd-cryptenroll --version
+  changed_when: false
+  register: _tpm2_cryptenroll_version
+
+- name: Parse systemd version number
+  ansible.builtin.set_fact:
+    _tpm2_systemd_version: >-
+      {{ _tpm2_cryptenroll_version.stdout
+         | regex_search('systemd\s+(\d+)', '\1')
+         | first }}
+
+- name: Assert systemd >= 248 (TPM2 support)
+  ansible.builtin.assert:
+    that:
+      - _tpm2_systemd_version | int >= 248
+    fail_msg: >-
+      systemd-cryptenroll TPM2 support requires systemd >= 248.
+      Detected version: {{ _tpm2_systemd_version }}
+
+- name: Verify TPM2 device exists
+  ansible.builtin.stat:
+    path: /dev/tpmrm0
+  register: _tpm2_device_stat
+
+- name: Assert TPM2 device is present
+  ansible.builtin.assert:
+    that:
+      - _tpm2_device_stat.stat.exists
+    fail_msg: >-
+      TPM2 resource manager device /dev/tpmrm0 not found.
+      Ensure the TPM2 kernel module is loaded and the device is available.
+
+- name: Wipe existing TPM2 slots and enroll new TPM2 token
+  ansible.builtin.shell:
+    cmd: >-
+      printf '%s' "$LUKS_PASSPHRASE" | systemd-cryptenroll
+      --unlock-key-file=/dev/stdin
+      {% if luks_rotation_tpm2_wipe_existing | bool %}--wipe-slot=tpm2{% endif %}
+      --tpm2-device={{ luks_rotation_tpm2_device }}
+      --tpm2-pcrs={{ luks_rotation_tpm2_pcrs }}
+      {{ item }}
+  environment:
+    LUKS_PASSPHRASE: "{{ _luks_rotation_new_passphrase }}"
+  become: true
+  loop: "{{ _luks_rotation_device_list }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Update /etc/crypttab for TPM2 auto-unlock
+  when: luks_rotation_tpm2_update_crypttab | bool
+  block:
+    - name: Read current /etc/crypttab
+      ansible.builtin.slurp:
+        src: /etc/crypttab
+      become: true
+      register: _tpm2_crypttab_raw
+
+    - name: Parse crypttab content
+      ansible.builtin.set_fact:
+        _tpm2_crypttab_content: "{{ _tpm2_crypttab_raw.content | b64decode }}"
+
+    - name: Update crypttab — set key field to '-' and add tpm2-device option
+      ansible.builtin.replace:
+        path: /etc/crypttab
+        regexp: '^(\S+\s+)({{ item | regex_escape }})(\s+)\S+(\s+)(.*)'
+        replace: '\1\2\3-\4\5'
+      become: true
+      loop: "{{ _luks_rotation_device_list }}"
+      loop_control:
+        label: "{{ item }} — set key field to -"
+      register: _tpm2_crypttab_keyfield
+
+    - name: Update crypttab — add tpm2-device=auto to options
+      ansible.builtin.replace:
+        path: /etc/crypttab
+        regexp: '^(\S+\s+{{ item | regex_escape }}\s+\S+\s+)((?!.*tpm2-device=).*)$'
+        replace: '\1\2,tpm2-device={{ luks_rotation_tpm2_device }}'
+      become: true
+      loop: "{{ _luks_rotation_device_list }}"
+      loop_control:
+        label: "{{ item }} — add tpm2-device"
+      register: _tpm2_crypttab_option
+
+    - name: Clean up leading comma in crypttab options
+      ansible.builtin.replace:
+        path: /etc/crypttab
+        regexp: '(\s),tpm2-device='
+        replace: '\1tpm2-device='
+      become: true
+
+- name: Regenerate initramfs
+  ansible.builtin.command: "{{ tpm2_initramfs_command }}"
+  become: true
+  when:
+    - luks_rotation_tpm2_update_initramfs | bool
+    - luks_rotation_tpm2_update_crypttab | bool
+    - >-
+      (_tpm2_crypttab_keyfield is defined and _tpm2_crypttab_keyfield is changed) or
+      (_tpm2_crypttab_option is defined and _tpm2_crypttab_option is changed)
+
+- name: Verify TPM2 enrollment on each device
+  ansible.builtin.command: "systemd-cryptenroll {{ item }}"
+  become: true
+  changed_when: false
+  loop: "{{ _luks_rotation_device_list }}"
+  loop_control:
+    label: "{{ item }}"
+  register: _tpm2_enrollment_status
+
+- name: Display TPM2 enrollment status
+  ansible.builtin.debug:
+    msg: "{{ item.stdout_lines }}"
+  loop: "{{ _tpm2_enrollment_status.results }}"
+  loop_control:
+    label: "{{ item.item }}"

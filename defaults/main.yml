@@ -1,0 +1,54 @@
+---
+# defaults file for luks_passphrase_rotation
+
+# ---------- LUKS settings ----------
+# Suppress passphrase values from task output (set to false for debugging)
+luks_rotation_no_log: true
+
+# List of current/old passphrases that may be on the LUKS devices (required)
+# luks_rotation_current_passphrases: []
+
+# ---------- Passphrase generation ----------
+# Length of the generated passphrase
+luks_rotation_passphrase_length: 64
+
+# Character set: "alphanumeric", "ascii_printable", or "hex"
+luks_rotation_passphrase_charset: "alphanumeric"
+
+# ---------- Vault integration ----------
+# Options: "none", "1password", "keeper", "both"
+luks_rotation_vault_integration: "none"
+
+# Title template for password manager entries (Jinja2 supported)
+luks_rotation_vault_title_template: "LUKS Passphrase - {{ inventory_hostname }}"
+
+# Whether to fail the play if vault upload encounters an error
+luks_rotation_vault_fail_on_upload_error: false
+
+# 1Password settings
+luks_rotation_1password_vault: "Infrastructure"
+luks_rotation_1password_tags:
+  - "luks"
+  - "encryption-key"
+
+# Keeper settings
+luks_rotation_keeper_folder_path: "LUKS Keys"
+luks_rotation_keeper_config_path: "~/.keeper/config.json"
+
+# ---------- Local backup ----------
+# Write an ansible-vault-encrypted copy of the new passphrase to localhost
+luks_rotation_local_backup_enabled: true
+
+# Directory on the Ansible controller where backups are stored
+luks_rotation_local_backup_dir: "./passphrase_backups"
+
+# Path to the vault password file used for encrypting backups (required when backup enabled)
+# luks_rotation_vault_password_file: ""
+
+# ---------- TPM2 auto-unlock ----------
+luks_rotation_tpm2_enabled: false
+luks_rotation_tpm2_wipe_existing: true
+luks_rotation_tpm2_device: "auto"
+luks_rotation_tpm2_pcrs: "7"
+luks_rotation_tpm2_update_crypttab: true
+luks_rotation_tpm2_update_initramfs: true

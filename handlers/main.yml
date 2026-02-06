@@ -1,0 +1,3 @@
+---
+# handlers file for luks_passphrase_rotation
+# No handlers needed — LUKS passphrase rotation does not restart services.

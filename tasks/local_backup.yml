@@ -1,0 +1,55 @@
+---
+# tasks/local_backup.yml — Write an ansible-vault-encrypted passphrase backup
+
+- name: Ensure local backup directory exists
+  ansible.builtin.file:
+    path: "{{ luks_rotation_local_backup_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Set backup file path
+  ansible.builtin.set_fact:
+    _luks_rotation_backup_file: "{{ luks_rotation_local_backup_dir }}/{{ inventory_hostname }}_luks_passphrase.yml"
+
+- name: Write passphrase to local backup file
+  ansible.builtin.copy:
+    content: |
+      ---
+      luks_passphrase: "{{ _luks_rotation_new_passphrase }}"
+      luks_devices: {{ _luks_rotation_device_list | to_json }}
+      rotated_date: "{{ ansible_date_time.iso8601 }}"
+    dest: "{{ _luks_rotation_backup_file }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: Encrypt backup file with ansible-vault
+  block:
+    - name: Run ansible-vault encrypt on backup file
+      ansible.builtin.command:
+        cmd: >
+          ansible-vault encrypt
+          --vault-password-file "{{ luks_rotation_vault_password_file }}"
+          "{{ _luks_rotation_backup_file }}"
+      delegate_to: localhost
+      become: false
+      register: _vault_encrypt_result
+      changed_when: _vault_encrypt_result.rc == 0
+
+  rescue:
+    - name: Delete plaintext backup on encryption failure
+      ansible.builtin.file:
+        path: "{{ _luks_rotation_backup_file }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+
+    - name: Fail after cleaning up plaintext file
+      ansible.builtin.fail:
+        msg: >
+          ansible-vault encryption failed for {{ _luks_rotation_backup_file }}.
+          The plaintext file has been deleted for security.
+          Error: {{ _vault_encrypt_result.stderr | default('unknown error') }}

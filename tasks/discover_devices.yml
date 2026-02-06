@@ -1,0 +1,23 @@
+---
+# tasks/discover_devices.yml — Find LUKS devices via blkid
+
+- name: Gather list of LUKS devices
+  ansible.builtin.command: /sbin/blkid -o device -t TYPE=crypto_LUKS
+  ignore_errors: true
+  changed_when: false
+  become: true
+  register: _luks_rotation_blkid
+
+- name: Set LUKS device list
+  ansible.builtin.set_fact:
+    _luks_rotation_device_list: "{{ _luks_rotation_blkid.stdout_lines | default([]) }}"
+
+- name: Print discovered LUKS devices
+  ansible.builtin.debug:
+    var: _luks_rotation_device_list
+
+- name: Assert at least one LUKS device was found
+  ansible.builtin.assert:
+    that:
+      - _luks_rotation_device_list | length > 0
+    fail_msg: "No LUKS devices found on {{ inventory_hostname }}"
