@@ -1,61 +1,109 @@
 ---
 # tasks/rotate_passphrase.yml — Add new passphrase, remove old passphrases
+# Uses cryptsetup directly because community.crypto.luks_device silently
+# fails to add passphrases on some LUKS2 configurations.
+
+- name: Write current passphrase to secure temp file
+  ansible.builtin.copy:
+    content: "{{ luks_rotation_current_passphrases[0] }}"
+    dest: /run/.luks_current_key
+    mode: "0600"
+    owner: root
+  become: true
+
+- name: Write new passphrase to secure temp file
+  ansible.builtin.copy:
+    content: "{{ _luks_rotation_new_passphrase }}"
+    dest: /run/.luks_new_key
+    mode: "0600"
+    owner: root
+  become: true
 
 - name: Rotate LUKS passphrases
   block:
     - name: Add new passphrase to each LUKS device
-      community.crypto.luks_device:
-        device: "{{ item }}"
-        state: "present"
-        passphrase: "{{ luks_rotation_current_passphrases[0] }}"
-        new_passphrase: "{{ _luks_rotation_new_passphrase }}"
+      ansible.builtin.command:
+        cmd: >-
+          cryptsetup luksAddKey {{ item }}
+          /run/.luks_new_key
+          --key-file /run/.luks_current_key
+          --batch-mode
       become: true
+      changed_when: true
+      register: _luks_add_result
       loop: "{{ _luks_rotation_device_list }}"
       loop_control:
-        label: "{{ item }} - REDACTED"
+        label: "{{ item }}"
+
+    - name: Verify new passphrase works on all devices
+      ansible.builtin.command:
+        cmd: >-
+          cryptsetup luksOpen --test-passphrase {{ item }}
+          --key-file /run/.luks_new_key
+      become: true
+      changed_when: false
+      loop: "{{ _luks_rotation_device_list }}"
+      loop_control:
+        label: "{{ item }}"
 
     - name: Remove old passphrases from each LUKS device
-      community.crypto.luks_device:
-        device: "{{ item.0 }}"
-        state: "present"
-        passphrase: "{{ _luks_rotation_new_passphrase }}"
-        remove_passphrase: "{{ item.1 }}"
+      ansible.builtin.command:
+        cmd: >-
+          cryptsetup luksRemoveKey {{ item }}
+          --key-file /run/.luks_current_key
+          --batch-mode
       become: true
-      loop: "{{ _luks_rotation_device_list | product(luks_rotation_current_passphrases) | list }}"
+      changed_when: _luks_remove_result.rc == 0
+      failed_when: false
+      register: _luks_remove_result
+      loop: "{{ _luks_rotation_device_list }}"
       loop_control:
-        label: "{{ item.0 }} - REDACTED"
+        label: "{{ item }}"
 
   rescue:
-    - name: "Rescue: Try every current passphrase to add the new one"
-      community.crypto.luks_device:
-        device: "{{ item.0 }}"
-        state: "present"
-        passphrase: "{{ item.1 }}"
-        new_passphrase: "{{ _luks_rotation_new_passphrase }}"
-      ignore_errors: true
+    - name: "Rescue: Try adding new passphrase with each current passphrase"
+      ansible.builtin.copy:
+        content: "{{ item.1 }}"
+        dest: /run/.luks_current_key
+        mode: "0600"
+        owner: root
       become: true
       loop: "{{ _luks_rotation_device_list | product(luks_rotation_current_passphrases) | list }}"
       loop_control:
         label: "{{ item.0 }} - REDACTED"
 
-    - name: "Rescue: Remove old passphrases using new passphrase"
-      community.crypto.luks_device:
-        device: "{{ item.0 }}"
-        state: "present"
-        passphrase: "{{ _luks_rotation_new_passphrase }}"
-        remove_passphrase: "{{ item.1 }}"
-      ignore_errors: true
+    - name: "Rescue: Add new passphrase using each current passphrase"
+      ansible.builtin.command:
+        cmd: >-
+          cryptsetup luksAddKey {{ item.0 }}
+          /run/.luks_new_key
+          --key-file /run/.luks_current_key
+          --batch-mode
       become: true
+      changed_when: _luks_rescue_add_result.rc == 0
+      failed_when: false
+      register: _luks_rescue_add_result
       loop: "{{ _luks_rotation_device_list | product(luks_rotation_current_passphrases) | list }}"
       loop_control:
         label: "{{ item.0 }} - REDACTED"
 
     - name: "Rescue: Verify new passphrase works on all devices"
-      community.crypto.luks_device:
-        device: "{{ item }}"
-        state: "present"
-        passphrase: "{{ _luks_rotation_new_passphrase }}"
+      ansible.builtin.command:
+        cmd: >-
+          cryptsetup luksOpen --test-passphrase {{ item }}
+          --key-file /run/.luks_new_key
       become: true
+      changed_when: false
       loop: "{{ _luks_rotation_device_list }}"
       loop_control:
         label: "{{ item }} - REDACTED"
+
+  always:
+    - name: Remove passphrase temp files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      become: true
+      loop:
+        - /run/.luks_current_key
+        - /run/.luks_new_key

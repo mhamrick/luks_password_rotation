@@ -27,9 +27,11 @@
 - name: Check if record already exists in Keeper
   ansible.builtin.shell:
     cmd: >
+      set -o pipefail &&
       keeper search --config "{{ _keeper_config_expanded }}"
       "{{ _keeper_item_title }}" --format json 2>/dev/null |
       jq -r '.[] | select(.title == "{{ _keeper_item_title }}") | .uid' | head -1
+    executable: /bin/bash
   delegate_to: localhost
   become: false
   register: _keeper_existing_record
@@ -48,6 +50,7 @@
   delegate_to: localhost
   become: false
   register: _keeper_create_result
+  changed_when: _keeper_create_result.rc == 0
   when: _keeper_existing_record.stdout == ""
   failed_when: luks_rotation_vault_fail_on_upload_error and _keeper_create_result.rc != 0
 
@@ -61,6 +64,7 @@
   delegate_to: localhost
   become: false
   register: _keeper_update_result
+  changed_when: _keeper_update_result.rc == 0
   when: _keeper_existing_record.stdout != ""
   failed_when: luks_rotation_vault_fail_on_upload_error and _keeper_update_result.rc != 0
 
@@ -75,6 +79,7 @@
       --custom-field "rotated_date={{ ansible_date_time.iso8601 }}"
   delegate_to: localhost
   become: false
+  changed_when: true
   when: (_keeper_create_result is changed) or (_keeper_update_result is changed)
   failed_when: false
 

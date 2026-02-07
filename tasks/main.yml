@@ -46,12 +46,6 @@
   ansible.builtin.include_tasks:
     file: discover_devices.yml
 
-- name: Rotate passphrases on LUKS devices
-  ansible.builtin.include_tasks:
-    file: rotate_passphrase.yml
-    apply:
-      no_log: "{{ luks_rotation_no_log | bool }}"
-
 - name: Enroll TPM2 auto-unlock on LUKS devices
   ansible.builtin.include_tasks:
     file: enroll_tpm2.yml
@@ -59,11 +53,22 @@
       no_log: "{{ luks_rotation_no_log | bool }}"
   when: luks_rotation_tpm2_enabled | bool
 
+- name: Rotate passphrases on LUKS devices
+  ansible.builtin.include_tasks:
+    file: rotate_passphrase.yml
+    apply:
+      no_log: "{{ luks_rotation_no_log | bool }}"
+
+- name: Save encrypted local backup
+  ansible.builtin.include_tasks:
+    file: local_backup.yml
+    apply:
+      no_log: "{{ luks_rotation_no_log | bool }}"
+  when: luks_rotation_local_backup_enabled | bool
+
 - name: Upload passphrase to 1Password
   ansible.builtin.include_tasks:
     file: vault_upload_1password.yml
-    apply:
-      no_log: "{{ luks_rotation_no_log | bool }}"
   when: luks_rotation_vault_integration in ["1password", "both"]
 
 - name: Upload passphrase to Keeper
@@ -72,10 +77,3 @@
     apply:
       no_log: "{{ luks_rotation_no_log | bool }}"
   when: luks_rotation_vault_integration in ["keeper", "both"]
-
-- name: Save encrypted local backup
-  ansible.builtin.include_tasks:
-    file: local_backup.yml
-    apply:
-      no_log: "{{ luks_rotation_no_log | bool }}"
-  when: luks_rotation_local_backup_enabled | bool

@@ -38,7 +38,10 @@
 
     - name: Generate random passphrase
       ansible.builtin.set_fact:
-        _luks_rotation_new_passphrase: "{{ lookup('ansible.builtin.password', '/dev/null chars=' + _luks_rotation_chars + ' length=' + luks_rotation_passphrase_length | string) }}"
+        _luks_rotation_new_passphrase: >-
+          {{ lookup('ansible.builtin.password',
+             '/dev/null chars=' + _luks_rotation_chars
+             + ' length=' + luks_rotation_passphrase_length | string) }}
 
 - name: Confirm passphrase was generated
   ansible.builtin.assert:
