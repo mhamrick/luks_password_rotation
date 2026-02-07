@@ -2,3 +2,4 @@ passphrase_backups/*
 !passphrase_backups/.gitkeep
 meta/.galaxy_install_info
 *.retry
+.vault_pass

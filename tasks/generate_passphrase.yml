@@ -1,20 +1,44 @@
 ---
 # tasks/generate_passphrase.yml — Generate a random passphrase
 
-- name: Map charset name to password lookup characters
-  ansible.builtin.set_fact:
-    _luks_rotation_chars: >-
-      {%- if luks_rotation_passphrase_charset == "hex" -%}
-        hexdigits
-      {%- elif luks_rotation_passphrase_charset == "ascii_printable" -%}
-        ascii_letters,digits,punctuation
-      {%- else -%}
-        ascii_letters,digits
-      {%- endif -%}
+- name: Generate word-based passphrase
+  when: luks_rotation_passphrase_mode == "words"
+  block:
+    - name: Pick random words from system dictionary
+      ansible.builtin.command:
+        cmd: "shuf -n {{ luks_rotation_passphrase_word_count | int }} /usr/share/dict/words"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      register: _luks_rotation_shuf_result
 
-- name: Generate random passphrase
-  ansible.builtin.set_fact:
-    _luks_rotation_new_passphrase: "{{ lookup('ansible.builtin.password', '/dev/null chars=' + _luks_rotation_chars + ' length=' + luks_rotation_passphrase_length | string) }}"
+    - name: Set word passphrase
+      ansible.builtin.set_fact:
+        _luks_rotation_new_passphrase: >-
+          {{ _luks_rotation_shuf_result.stdout_lines
+             | map('lower')
+             | map('regex_replace', "[^a-z]", "")
+             | select('match', '^.{3,}$')
+             | list
+             | join(luks_rotation_passphrase_word_separator) }}
+
+- name: Generate random character passphrase
+  when: luks_rotation_passphrase_mode == "random"
+  block:
+    - name: Map charset name to password lookup characters
+      ansible.builtin.set_fact:
+        _luks_rotation_chars: >-
+          {%- if luks_rotation_passphrase_charset == "hex" -%}
+            hexdigits
+          {%- elif luks_rotation_passphrase_charset == "ascii_printable" -%}
+            ascii_letters,digits,punctuation
+          {%- else -%}
+            ascii_letters,digits
+          {%- endif -%}
+
+    - name: Generate random passphrase
+      ansible.builtin.set_fact:
+        _luks_rotation_new_passphrase: "{{ lookup('ansible.builtin.password', '/dev/null chars=' + _luks_rotation_chars + ' length=' + luks_rotation_passphrase_length | string) }}"
 
 - name: Confirm passphrase was generated
   ansible.builtin.assert:

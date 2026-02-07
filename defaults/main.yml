@@ -9,10 +9,15 @@ luks_rotation_no_log: true
 # luks_rotation_current_passphrases: []
 
 # ---------- Passphrase generation ----------
-# Length of the generated passphrase
-luks_rotation_passphrase_length: 64
+# Mode: "words" (diceware-style word list) or "random" (random characters)
+luks_rotation_passphrase_mode: "words"
 
-# Character set: "alphanumeric", "ascii_printable", or "hex"
+# Word mode settings
+luks_rotation_passphrase_word_count: 8
+luks_rotation_passphrase_word_separator: "-"
+
+# Random mode settings
+luks_rotation_passphrase_length: 64
 luks_rotation_passphrase_charset: "alphanumeric"
 
 # ---------- Vault integration ----------

@@ -7,6 +7,7 @@
       - "{{ current_luks_passphrase }}"
     current_luks_passphrase: ""
     luks_rotation_vault_integration: "1password"
-    luks_rotation_local_backup_enabled: false
+    luks_rotation_local_backup_enabled: true
+    luks_rotation_vault_password_file: "{{ playbook_dir }}/.vault_pass"
   roles:
     - role: "{{ playbook_dir }}"
