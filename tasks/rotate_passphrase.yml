@@ -2,6 +2,7 @@
 # tasks/rotate_passphrase.yml — Add new passphrase, remove old passphrases
 # Uses cryptsetup directly because community.crypto.luks_device silently
 # fails to add passphrases on some LUKS2 configurations.
+# Supports both key-file and LUKS2 token (e.g., TPM2) authentication.
 
 - name: Write current passphrase to secure temp file
   ansible.builtin.copy:
@@ -21,7 +22,7 @@
 
 - name: Rotate LUKS passphrases
   block:
-    - name: Add new passphrase to each LUKS device
+    - name: Add new passphrase to each LUKS device (key-file auth)
       ansible.builtin.command:
         cmd: >-
           cryptsetup luksAddKey {{ item }}
@@ -30,16 +31,32 @@
           --batch-mode
       become: true
       changed_when: true
-      register: _luks_add_result
+      failed_when: false
+      register: _luks_add_keyfile_result
       loop: "{{ _luks_rotation_device_list }}"
       loop_control:
         label: "{{ item }}"
+
+    - name: Add new passphrase using token auth (fallback for TPM2)
+      ansible.builtin.command:
+        cmd: >-
+          cryptsetup luksAddKey {{ item.item }}
+          /run/.luks_new_key
+          --token-only
+          --batch-mode
+      become: true
+      changed_when: true
+      register: _luks_add_token_result
+      loop: "{{ _luks_add_keyfile_result.results | selectattr('rc', 'ne', 0) | list }}"
+      loop_control:
+        label: "{{ item.item }}"
 
     - name: Verify new passphrase works on all devices
       ansible.builtin.command:
         cmd: >-
           cryptsetup luksOpen --test-passphrase {{ item }}
           --key-file /run/.luks_new_key
+          --disable-external-tokens
       become: true
       changed_when: false
       loop: "{{ _luks_rotation_device_list }}"
@@ -87,11 +104,28 @@
       loop_control:
         label: "{{ item.0 }} - REDACTED"
 
+    - name: "Rescue: Try token-based auth as last resort"
+      ansible.builtin.command:
+        cmd: >-
+          cryptsetup luksAddKey {{ item }}
+          /run/.luks_new_key
+          --token-only
+          --batch-mode
+      become: true
+      changed_when: _luks_rescue_token_result.rc == 0
+      failed_when: false
+      register: _luks_rescue_token_result
+      loop: "{{ _luks_rotation_device_list }}"
+      loop_control:
+        label: "{{ item }}"
+      when: _luks_rescue_add_result.results | selectattr('rc', 'eq', 0) | list | length == 0
+
     - name: "Rescue: Verify new passphrase works on all devices"
       ansible.builtin.command:
         cmd: >-
           cryptsetup luksOpen --test-passphrase {{ item }}
           --key-file /run/.luks_new_key
+          --disable-external-tokens
       become: true
       changed_when: false
       loop: "{{ _luks_rotation_device_list }}"
